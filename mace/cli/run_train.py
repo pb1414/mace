@@ -19,6 +19,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import LBFGS
 from torch.utils.data import ConcatDataset
 from torch_ema import ExponentialMovingAverage
+from itertools import chain
 
 import mace
 from mace import data, tools
@@ -610,6 +611,12 @@ def run(args) -> None:
             ]
         if not valid_sets[head_config.head_name]:
             raise ValueError(f"No valid datasets found for head {head_config.head_name}, please provide a valid_file or a valid_fraction")
+
+        if args.model == "MACELES":
+            # Zero out cell for non-periodic BCs so that real space LES Ewald method is called
+            for conformation in chain(train_sets[head_config.head_name], valid_sets[head_config.head_name]):
+                if not any(conformation.pbc):
+                    conformation.cell = torch.zeros((3, 3), dtype=conformation.positions.dtype)
 
         # Create data loader for this head
         if isinstance(train_sets[head_config.head_name], list):
