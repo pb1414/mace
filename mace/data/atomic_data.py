@@ -77,6 +77,7 @@ class AtomicData(torch_geometric.data.Data):
         elec_temp: Optional[torch.Tensor],  # [,]
         total_charge: Optional[torch.Tensor] = None,  # [,]
         total_spin: Optional[torch.Tensor] = None,  # [,]
+        atomic_numbers: Optional[torch.Tensor] = None,  # [n_nodes, ]
     ):
         # Check shapes
         num_nodes = node_attrs.shape[0]
@@ -133,6 +134,7 @@ class AtomicData(torch_geometric.data.Data):
             "elec_temp": elec_temp,
             "total_charge": total_charge,
             "total_spin": total_spin,
+            "atomic_numbers": atomic_numbers,
         }
         super().__init__(**data)
 
@@ -329,6 +331,17 @@ class AtomicData(torch_geometric.data.Data):
             else torch.tensor(1.0, dtype=torch.get_default_dtype())
         )
 
+        #atomic numbers
+        atomic_numbers = (
+            torch.tensor(
+                config.atomic_numbers, dtype=torch.get_default_dtype()
+            )
+        )
+        # print("using local atomic disp")
+        # print(energy)
+        # print("atomic numbers:", atomic_numbers)
+        # print(charges)
+
         return cls(
             edge_index=torch.tensor(edge_index, dtype=torch.long),
             positions=torch.tensor(config.positions, dtype=torch.get_default_dtype()),
@@ -355,6 +368,7 @@ class AtomicData(torch_geometric.data.Data):
             total_charge=total_charge,
             polarizability=polarizability,
             total_spin=total_spin,
+            atomic_numbers=atomic_numbers,
         )
 
 

@@ -131,7 +131,20 @@ def mean_squared_error_forces(
         configs_weight
         * configs_forces_weight
         * torch.square(ref["forces"] - pred["forces"])
+        # +
+        # configs_weight
+        # * torch.square(ref["charges"] - pred["latent_charges"])  # Charge loss added
     )
+    return reduce_loss(raw_loss, ddp)
+
+def mean_squared_error_charges(
+    ref: Batch, pred: TensorDict, ddp: Optional[bool] = None
+) -> torch.Tensor:
+    configs_weight = torch.repeat_interleave(
+        ref.weight, ref.ptr[1:] - ref.ptr[:-1]
+    ).unsqueeze(-1)
+
+    raw_loss = configs_weight * torch.square(ref["charges"] - pred["latent_charges"])
     return reduce_loss(raw_loss, ddp)
 
 
@@ -260,6 +273,9 @@ class WeightedEnergyForcesLoss(torch.nn.Module):
     ) -> torch.Tensor:
         loss_energy = weighted_mean_squared_error_energy(ref, pred, ddp)
         loss_forces = mean_squared_error_forces(ref, pred, ddp)
+        # loss_charges = mean_squared_error_charges(ref, pred, ddp)  # Charge loss added
+        # print("chargelossbeing used")
+        # return self.energy_weight * loss_energy + self.forces_weight * loss_forces + 1000.0*loss_charges
         return self.energy_weight * loss_energy + self.forces_weight * loss_forces
 
     def __repr__(self):

@@ -139,9 +139,9 @@ def create_error_table(
             table.add_row(
                 [
                     name,
-                    f"{metrics['rmse_e'] * 1000:8.1f}",
-                    f"{metrics['rmse_f'] * 1000:8.1f}",
-                    f"{metrics['rel_rmse_f']:8.2f}",
+                    f"{metrics['rmse_e'] * 1000:8.2f}",
+                    f"{metrics['rmse_f'] * 1000:8.2f}",
+                    f"{metrics['rel_rmse_f']:8.3f}",
                 ]
             )
         elif table_type == "PerAtomRMSE":

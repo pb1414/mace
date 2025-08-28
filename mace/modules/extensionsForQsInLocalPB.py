@@ -35,6 +35,45 @@ def _copy_mace_readout(
         )
     raise TypeError("Unsupported readout type.")
 
+from e3nn.o3 import Irreps
+
+def _copy_mace_readout2(
+    mace_readout: torch.nn.Module,
+    cueq_config: Optional[CuEquivarianceConfig] = None,
+    extra_in_irreps: Optional[str] = None,  # pass "0e" for latent charge
+) -> torch.nn.Module:
+    """
+    Helper function to copy a MACE readout block,
+    with optional augmentation of input irreps (for latent charges).
+    """
+    if isinstance(mace_readout, LinearReadoutBlock):
+        irreps_in = mace_readout.linear.irreps_in  # type:ignore
+        if extra_in_irreps is not None:
+            irreps_in = irreps_in + Irreps(extra_in_irreps)
+
+        return LinearReadoutBlock(
+            irreps_in=irreps_in,
+            irrep_out=mace_readout.linear.irreps_out,  # type:ignore
+            cueq_config=cueq_config,
+        )
+
+    if isinstance(mace_readout, NonLinearReadoutBlock):  # type:ignore
+        irreps_in = mace_readout.linear_1.irreps_in  # type:ignore
+        if extra_in_irreps is not None:
+            irreps_in = irreps_in + Irreps(extra_in_irreps)
+
+        return NonLinearReadoutBlock(
+            irreps_in=irreps_in,
+            MLP_irreps=mace_readout.hidden_irreps,
+            gate=mace_readout.non_linearity._modules["acts"][0].f,
+            irrep_out=mace_readout.linear_2.irreps_out,  # type:ignore
+            num_heads=mace_readout.num_heads,
+            cueq_config=cueq_config,
+        )
+
+    raise TypeError("Unsupported readout type.")
+
+
 
 def _get_readout_input_dim(block: torch.nn.Module) -> int:
     if isinstance(block, LinearReadoutBlock):
@@ -67,6 +106,11 @@ class MACELES(ScaleShiftMACE):
         for readout in self.readouts:  # type:ignore
             self.les_readouts.append(
                 _copy_mace_readout(readout, cueq_config=cueq_config)
+            )
+        self.readouts_with_q = torch.nn.ModuleList()
+        for readout in self.readouts:
+            self.readouts_with_q.append(
+                _copy_mace_readout2(readout, cueq_config=cueq_config, extra_in_irreps="0e")
             )
 
     def forward(
@@ -184,14 +228,36 @@ class MACELES(ScaleShiftMACE):
             zip(self.readouts, self.les_readouts)
         ):
             feat_idx = -1 if len(self.readouts) == 1 else i
-            node_es = readout(node_feats_list[feat_idx], node_heads)[
-                num_atoms_arange, node_heads
-            ]
+            # node_es = readout(node_feats_list[feat_idx], node_heads)[
+            #     num_atoms_arange, node_heads
+            # ]
             node_qs = les_readout(node_feats_list[feat_idx], node_heads)[
                 num_atoms_arange, node_heads
             ]  # type:ignore
             node_qs_list.append(node_qs)
+            # node_es_list.append(node_es)
+        les_q = torch.sum(torch.stack(node_qs_list, dim=1), dim=1)
+        node_feats_list_with_q = []
+        for feats in node_feats_list:
+            print("Shape of feats and shape of les_q:", feats.shape, les_q.shape)
+            feats_with_q = torch.cat([feats, les_q.unsqueeze(-1)], dim=-1)
+            node_feats_list_with_q.append(feats_with_q)
+
+
+        for i, (readout, les_readout) in enumerate(
+            zip(self.readouts, self.les_readouts)
+        ):
+            feat_idx = -1 if len(self.readouts) == 1 else i
+            feats_in = node_feats_list_with_q[feat_idx]  # <- augmented features
+            node_es = self.readouts_with_q[i](feats_in, node_heads)[
+                num_atoms_arange, node_heads
+            ]
+            # node_qs = les_readout(node_feats_list[feat_idx], node_heads)[
+            #     num_atoms_arange, node_heads
+            # ]  # type:ignore
+            # node_qs_list.append(node_qs)
             node_es_list.append(node_es)
+
 
         node_feats_out = torch.cat(node_feats_list, dim=-1)
         node_inter_es = torch.sum(torch.stack(node_es_list, dim=0), dim=0)
@@ -201,7 +267,7 @@ class MACELES(ScaleShiftMACE):
         total_energy = e0 + inter_e
         node_energy = node_e0.clone().double() + node_inter_es.clone().double()
 
-        les_q = torch.sum(torch.stack(node_qs_list, dim=1), dim=1)
+        # les_q = torch.sum(torch.stack(node_qs_list, dim=1), dim=1)
         les_result = self.les(
             latent_charges=les_q,
             positions=positions,
@@ -232,6 +298,8 @@ class MACELES(ScaleShiftMACE):
             compute_hessian=compute_hessian,
             compute_edge_forces=compute_edge_forces,
         )
+
+        # print("forces in extensions", forces)
 
         atomic_virials: Optional[torch.Tensor] = None
         atomic_stresses: Optional[torch.Tensor] = None
